@@ -1,7 +1,8 @@
-import os
+import argparse
+import pathlib
 import numpy as np
 import json
-from PIL import Image
+from PIL import Image, ImageDraw
 
 def detect_red_light(image_numpy):
     '''
@@ -54,30 +55,53 @@ def detect_red_light(image_numpy):
 
     return bounding_boxes
 
-# set the path to the downloaded data: 
-data_path = 'data/RedLights2011_Medium'
 
-# set a path for saving predictions: 
-preds_path = 'results/hw01_preds'
-os.makedirs(preds_path,exist_ok=True) # create directory if needed 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Detect red lights in images.')
+    parser.add_argument('-d', '--data-folder', help='folder of images with red lights',
+            default='data/RedLights2011_Medium', type=pathlib.Path)
+    parser.add_argument('-o', '--output-folder', help='folder to output predictions',
+            default='results/hw01_preds', type=pathlib.Path)
+    parser.add_argument('--save-images', help='save images with bounding boxes to output folder',
+            action='store_true')
+
+    return parser.parse_args()
+
+
+args = parse_args()
+
+# create directory if needed 
+args.output_folder.mkdir(exist_ok=True)
 
 # get sorted list of files: 
-file_names = sorted(os.listdir(data_path)) 
+file_paths = sorted(args.data_folder.iterdir())
 
 # remove any non-JPEG files: 
-file_names = [f for f in file_names if '.jpg' in f] 
+file_paths = [f for f in file_paths if (f.suffix == '.jpg')] 
 
-preds = {}
-for file_idx in range(len(file_names)):
+bounding_boxes_preds = {}
+for file_path in file_paths:
 
     # read image using PIL:
-    image = Image.open(os.path.join(data_path,file_names[file_idx]))
+    image = Image.open(file_path)
 
     # convert to numpy array:
     image_numpy = np.asarray(image)
 
-    preds[file_names[file_idx]] = detect_red_light(image_numpy)
+    # Predict bounding boxes and store to dictionary
+    bounding_boxes_pred = detect_red_light(image_numpy)
+    bounding_boxes_preds[file_path.name] = bounding_boxes_pred
+
+    if args.save_images:
+        # Draw bounding boxes and save out images
+        draw = ImageDraw.Draw(image)
+        NEON_GREEN = '#39FF14'
+        for box in bounding_boxes_pred:
+            draw.rectangle(box, outline=NEON_GREEN)
+        image.save(args.output_folder.joinpath(file_path.name))
+
 
 # save preds (overwrites any previous predictions!)
-with open(os.path.join(preds_path,'preds.json'),'w') as f:
-    json.dump(preds,f)
+output_path = args.output_folder.joinpath('bounding_boxes_preds.json')
+with output_path.open(mode='w') as f:
+    json.dump(bounding_boxes_preds,f)
