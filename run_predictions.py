@@ -74,9 +74,9 @@ for file_idx in range(len(file_names)):
     image = Image.open(os.path.join(data_path,file_names[file_idx]))
 
     # convert to numpy array:
-    I_numpy = np.asarray(image)
+    image_numpy = np.asarray(image)
 
-    preds[file_names[file_idx]] = detect_red_light(I_numpy)
+    preds[file_names[file_idx]] = detect_red_light(image_numpy)
 
 # save preds (overwrites any previous predictions!)
 with open(os.path.join(preds_path,'preds.json'),'w') as f:
