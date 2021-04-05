@@ -2,11 +2,14 @@ import argparse
 import pathlib
 import numpy as np
 from scipy.ndimage import gaussian_filter, maximum_filter, measurements
+from scipy.stats.stats import pearsonr
+from scipy.signal import convolve, convolve2d, correlate
 from skimage.measure import regionprops
 import json
 from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
 import cv2
+from joblib import Parallel, delayed
 
 
 def detect_red_light(image_numpy, method):
@@ -26,6 +29,8 @@ def detect_red_light(image_numpy, method):
 
     if method == 'threshold':
         bounding_boxes = detect_red_light_threshold(image_numpy)
+    elif method == 'matchedfilter':
+        bounding_boxes = detect_red_light_matchedfilter(image_numpy)
     else:
         raise NotImplementedError
 
@@ -59,6 +64,31 @@ def detect_red_light_threshold(image_numpy):
 
     return bounding_boxes
 
+
+def detect_red_light_matchedfilter(image_numpy, threshold=0.9):
+    """
+    This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
+    Convolves image with a matched filter, then finds areas above the threshold.
+    """
+    matchedfilter = Image.open('filters/redlight.jpg')
+    matchedfilter = np.asarray(matchedfilter)
+    # l2-normalize
+    matchedfilter /= np.linalg.norm(matchedfilter, ord='fro')
+
+    # no color dimension for filter match
+    # Create a filter_match just for visualizsation
+    filter_match = np.zeros(image_numpy.shape[:-1])
+    bbox_list = []
+    # Iterate over left and right of
+    for x_left in range(image_numpy.shape[0] - matchedfilter.shape[0]):
+        for y_top in range(image_numpy.shape[1] - matchedfilter.shape[1]):
+            sub_image = image_numpy[x_left:(x_left + matchedfilter.shape[0]),y_top:(y_top + matchedfilter.shape[1])]
+            corr = pearsonr(sub_image.flatten(), matchedfilter.flatten())[0]
+            filter_match[x_left, y_top] = corr
+            if corr > threshold:
+                bbox_list.append((x_left, y_top, x_left + matchedfilter.shape[0], y_top + matchedfilter.shape[1]))
+
+    return bbox_list
 
 def mask_to_bboxes(mask):
     """Convert boolean mask to a list of bounding boxes (around the countors)
@@ -104,6 +134,30 @@ def parse_args():
     return parser.parse_args()
 
 
+def find_bounding_boxes(file_path, output_folder=None, save_images=False):
+    """
+    file_path: path to image file.
+    """
+    # read image using PIL:
+    image = Image.open(file_path)
+
+    # convert to numpy array:
+    image_numpy = np.asarray(image)
+
+    # Predict bounding boxes and store to dictionary
+    bounding_boxes_pred = detect_red_light(image_numpy, args.method)
+
+    if save_images:
+        # Draw bounding boxes and save out images
+        draw = ImageDraw.Draw(image)
+        NEON_GREEN = '#39FF14'
+        for box in bounding_boxes_pred:
+            draw.rectangle(box, outline=NEON_GREEN)
+        image.save(output_folder.joinpath(file_path.name))
+
+    return bounding_boxes_pred
+
+
 args = parse_args()
 
 # create directory if needed
@@ -113,28 +167,14 @@ args.output_folder.mkdir(exist_ok=True)
 file_paths = sorted(args.data_folder.iterdir())
 
 # remove any non-JPEG files:
-file_paths = [f for f in file_paths if (f.suffix == '.jpg')]
+# file_paths = [f for f in file_paths if (f.suffix == '.jpg')]
+file_paths = [f for f in file_paths if (f.name == 'RL-016.jpg')]
 
-bounding_boxes_preds = {}
-for file_path in file_paths:
 
-    # read image using PIL:
-    image = Image.open(file_path)
-
-    # convert to numpy array:
-    image_numpy = np.asarray(image)
-
-    # Predict bounding boxes and store to dictionary
-    bounding_boxes_pred = detect_red_light(image_numpy, args.method)
-    bounding_boxes_preds[file_path.name] = bounding_boxes_pred
-
-    if args.save_images:
-        # Draw bounding boxes and save out images
-        draw = ImageDraw.Draw(image)
-        NEON_GREEN = '#39FF14'
-        for box in bounding_boxes_pred:
-            draw.rectangle(box, outline=NEON_GREEN)
-        image.save(args.output_folder.joinpath(file_path.name))
+bbox_list = Parallel(n_jobs=-3)(delayed(find_bounding_boxes)(file_path, args.output_folder, True) for file_path in file_paths)
+# bbox_list = [find_bounding_boxes(file_path, args.output_folder, True) for file_path in file_paths]
+file_names = map(lambda x: x.name, file_paths)
+bounding_boxes_preds = dict(zip(file_paths, bbox_list))
 
 
 # save preds (overwrites any previous predictions!)
