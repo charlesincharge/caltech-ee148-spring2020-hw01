@@ -73,7 +73,7 @@ def detect_red_light_matchedfilter(image_numpy, threshold=0.9):
     matchedfilter = Image.open('filters/redlight.jpg')
     matchedfilter = np.asarray(matchedfilter)
     # l2-normalize
-    matchedfilter /= np.linalg.norm(matchedfilter, ord='fro')
+    matchedfilter = matchedfilter / matchedfilter.sum()
 
     # no color dimension for filter match
     # Create a filter_match just for visualizsation
@@ -171,8 +171,8 @@ file_paths = sorted(args.data_folder.iterdir())
 file_paths = [f for f in file_paths if (f.name == 'RL-016.jpg')]
 
 
-bbox_list = Parallel(n_jobs=-3)(delayed(find_bounding_boxes)(file_path, args.output_folder, True) for file_path in file_paths)
-# bbox_list = [find_bounding_boxes(file_path, args.output_folder, True) for file_path in file_paths]
+# bbox_list = Parallel(n_jobs=-3)(delayed(find_bounding_boxes)(file_path, args.output_folder, True) for file_path in file_paths)
+bbox_list = [find_bounding_boxes(file_path, args.output_folder, True) for file_path in file_paths]
 file_names = map(lambda x: x.name, file_paths)
 bounding_boxes_preds = dict(zip(file_paths, bbox_list))
 
