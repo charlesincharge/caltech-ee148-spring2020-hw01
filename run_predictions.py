@@ -1,11 +1,15 @@
 import argparse
 import pathlib
 import numpy as np
+from scipy.ndimage import gaussian_filter, maximum_filter, measurements
+from skimage.measure import regionprops
 import json
 from PIL import Image, ImageDraw
+import matplotlib.pyplot as plt
+import cv2
 
 
-def detect_red_light(image_numpy):
+def detect_red_light(image_numpy, method):
     """
     This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
     The list <bounding_boxes> should have one element for each red light in the
@@ -20,45 +24,63 @@ def detect_red_light(image_numpy):
     image_numpy[:,:,2] is the blue channel
     """
 
-    # This should be a list of lists, each of length 4. See format example below.
-    bounding_boxes =[]
+    if method == 'threshold':
+        bounding_boxes = detect_red_light_threshold(image_numpy)
+    else:
+        raise NotImplementedError
 
-    '''
-    BEGIN YOUR CODE
-    '''
-
-    '''
-    As an example, here's code that generates between 1 and 5 random boxes
-    of fixed size and returns the results in the proper format.
-    '''
-
-    box_height = 8
-    box_width = 6
-
-    num_boxes = np.random.randint(1, 5)
-
-    for box_idx in range(num_boxes):
-        (n_rows, n_cols, n_channels) = np.shape(image_numpy)
-
-        tl_row = np.random.randint(n_rows - box_height)
-        tl_col = np.random.randint(n_cols - box_width)
-        br_row = tl_row + box_height
-        br_col = tl_col + box_width
-
-        bounding_boxes.append([tl_row, tl_col, br_row, br_col])
-
-    '''
-    END YOUR CODE
-    '''
-
+    # Check that boxes each have 4 coordinates
     for bounding_box in bounding_boxes:
         assert len(bounding_box) == 4
 
     return bounding_boxes
 
 
+def detect_red_light_threshold(image_numpy):
+    """
+    This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
+    Smoothes data with a Gaussian kernel, then draw boxes around values above a threshold
+    """
+    # This should be a list of lists, each of length 4. See format example below.
+    bounding_boxes = []
+
+    # Smooth along x and y axes, but not color axis
+    image_numpy = gaussian_filter(image_numpy, sigma=[1, 1, 0])
+
+    image_red = image_numpy[:,:,0]
+    image_green = image_numpy[:,:,1]
+    image_blue = image_numpy[:,:,2]
+
+    THRESHOLD_RED = 175
+    THRESHOLD_NOT_RED = 125
+    red_mask = (image_red > THRESHOLD_RED) & (image_green < THRESHOLD_NOT_RED) & (image_blue < THRESHOLD_NOT_RED)
+
+    bounding_boxes = mask_to_bboxes(red_mask)
+
+    return bounding_boxes
+
+
+def mask_to_bboxes(mask):
+    """Convert boolean mask to a list of bounding boxes (around the countors)
+    """
+    bbox_list = []
+    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    for contour in contours:
+        x,y,w,h = cv2.boundingRect(contour)
+        bbox_list.append((x, y, x + w, y + h))
+
+    return bbox_list
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Detect red lights in images.')
+    parser.add_argument(
+        '-m',
+        '--method',
+        help='detection method',
+        choices=['threshold', 'matchedfilter'],
+        default='threshold',
+    )
     parser.add_argument(
         '-d',
         '--data-folder',
@@ -103,7 +125,7 @@ for file_path in file_paths:
     image_numpy = np.asarray(image)
 
     # Predict bounding boxes and store to dictionary
-    bounding_boxes_pred = detect_red_light(image_numpy)
+    bounding_boxes_pred = detect_red_light(image_numpy, args.method)
     bounding_boxes_preds[file_path.name] = bounding_boxes_pred
 
     if args.save_images:
