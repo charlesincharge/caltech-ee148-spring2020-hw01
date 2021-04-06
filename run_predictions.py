@@ -52,20 +52,26 @@ def detect_red_light_threshold(image_numpy):
     # Smooth along x and y axes, but not color axis
     image_numpy = gaussian_filter(image_numpy, sigma=[1, 1, 0])
 
-    image_red = image_numpy[:,:,0]
-    image_green = image_numpy[:,:,1]
-    image_blue = image_numpy[:,:,2]
+    image_red = image_numpy[:, :, 0]
+    image_green = image_numpy[:, :, 1]
+    image_blue = image_numpy[:, :, 2]
 
     THRESHOLD_RED = 175
     THRESHOLD_NOT_RED = 125
-    red_mask = (image_red > THRESHOLD_RED) & (image_green < THRESHOLD_NOT_RED) & (image_blue < THRESHOLD_NOT_RED)
+    red_mask = (
+        (image_red > THRESHOLD_RED)
+        & (image_green < THRESHOLD_NOT_RED)
+        & (image_blue < THRESHOLD_NOT_RED)
+    )
 
     bounding_boxes = mask_to_bboxes(red_mask)
 
     return bounding_boxes
 
 
-def detect_red_light_matchedfilter(image_numpy, threshold=0.9, filter_path='filters/redlight.jpg'):
+def detect_red_light_matchedfilter(
+    image_numpy, threshold=0.9, filter_path='filters/redlight.jpg'
+):
     """
     This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
     Convolves image with a matched filter, then finds areas above the threshold.
@@ -82,23 +88,33 @@ def detect_red_light_matchedfilter(image_numpy, threshold=0.9, filter_path='filt
     # Iterate over left and right of
     for tl_row in range(image_numpy.shape[0] - matchedfilter.shape[0]):
         for tl_col in range(image_numpy.shape[1] - matchedfilter.shape[1]):
-            sub_image = image_numpy[tl_row:(tl_row + matchedfilter.shape[0]),tl_col:(tl_col + matchedfilter.shape[1])]
+            sub_image = image_numpy[
+                tl_row : (tl_row + matchedfilter.shape[0]),
+                tl_col : (tl_col + matchedfilter.shape[1]),
+            ]
             corr = pearsonr(sub_image.flatten(), matchedfilter.flatten())[0]
             filter_match[tl_row, tl_col] = corr
 
             # Is this sub-image highly correlated (ie, good projection onto) with the filter?
             if corr > threshold:
-                bbox_list.append((tl_row, tl_col, tl_row + matchedfilter.shape[0], tl_col + matchedfilter.shape[1]))
+                bbox_list.append(
+                    (
+                        tl_row,
+                        tl_col,
+                        tl_row + matchedfilter.shape[0],
+                        tl_col + matchedfilter.shape[1],
+                    )
+                )
 
     return bbox_list
 
+
 def mask_to_bboxes(mask):
-    """Convert boolean mask to a list of bounding boxes (around the countors)
-    """
+    """Convert boolean mask to a list of bounding boxes (around the countors)"""
     bbox_list = []
     contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     for contour in contours:
-        x,y,w,h = cv2.boundingRect(contour)
+        x, y, w, h = cv2.boundingRect(contour)
         bbox_list.append((x, y, x + w, y + h))
 
     return bbox_list
@@ -150,7 +166,7 @@ def parse_args():
         '--num-images',
         help='number of images to process. defaults to all, set to int to process fewer (eg, for debugging)',
         type=int,
-        default=None
+        default=None,
     )
 
     return parser.parse_args()
@@ -191,10 +207,15 @@ file_paths = sorted(args.data_folder.iterdir())
 # remove any non-JPEG files:
 file_paths = [f for f in file_paths if (f.suffix == '.jpg')]
 # Limit files.
-file_paths = file_paths[:args.num_images]
+file_paths = file_paths[: args.num_images]
 
 
-bbox_list = Parallel(n_jobs=-3)(delayed(file_to_bounding_boxes)(file_path, args.output_folder, save_images=True, filter_path=args.filter_path) for file_path in file_paths)
+bbox_list = Parallel(n_jobs=-3)(
+    delayed(file_to_bounding_boxes)(
+        file_path, args.output_folder, save_images=True, filter_path=args.filter_path
+    )
+    for file_path in file_paths
+)
 # bbox_list = [file_to_bounding_boxes(file_path, args.output_folder, True) for file_path in file_paths]
 file_names = map(lambda x: x.name, file_paths)
 bounding_boxes_preds = dict(zip(file_names, bbox_list))
