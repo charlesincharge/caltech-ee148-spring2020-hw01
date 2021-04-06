@@ -5,8 +5,6 @@ from scipy.ndimage import gaussian_filter
 from scipy.stats.stats import pearsonr
 import json
 from PIL import Image, ImageDraw
-import matplotlib.pyplot as plt
-import cv2
 from joblib import Parallel, delayed
 
 
