@@ -1,10 +1,8 @@
 import argparse
 import pathlib
 import numpy as np
-from scipy.ndimage import gaussian_filter, maximum_filter, measurements, convolve
+from scipy.ndimage import gaussian_filter
 from scipy.stats.stats import pearsonr
-from scipy.signal import convolve, convolve2d, correlate
-from skimage.measure import regionprops
 import json
 from PIL import Image, ImageDraw
 import matplotlib.pyplot as plt
