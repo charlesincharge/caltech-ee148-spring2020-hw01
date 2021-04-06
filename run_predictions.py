@@ -31,6 +31,8 @@ def detect_red_light(image_numpy, method, **kwargs):
         bounding_boxes = detect_red_light_threshold(image_numpy)
     elif method == 'matchedfilter':
         bounding_boxes = detect_red_light_matchedfilter(image_numpy, **kwargs)
+    elif method == 'matchedfilter_multi':
+        bounding_boxes = detect_red_light_matchedfilter_multi(image_numpy)
     else:
         raise NotImplementedError
 
@@ -109,6 +111,16 @@ def detect_red_light_matchedfilter(
     return bbox_list
 
 
+def detect_red_light_matchedfilter_multi(
+        image_numpy, threshold=0.9, filter_path=['filters/redlight.jpg', 'filters/bigredlight.jpg']):
+    """Use multiple matched filters to detect sized red lights of different pixel-sizes."""
+    bbox_list = []
+    for filter_p in filter_path:
+        bbox_list += detect_red_light_matchedfilter(image_numpy, threshold, filter_p)
+
+    return bbox_list
+
+
 def mask_to_bboxes(mask):
     """Convert boolean mask to a list of bounding boxes (around the countors)"""
     bbox_list = []
@@ -132,7 +144,7 @@ def parse_args():
         '-m',
         '--method',
         help='detection method',
-        choices=['threshold', 'matchedfilter'],
+        choices=['threshold', 'matchedfilter', 'matchedfilter_multi'],
         default='threshold',
     )
     parser.add_argument(
@@ -212,7 +224,7 @@ file_paths = file_paths[: args.num_images]
 
 bbox_list = Parallel(n_jobs=-3)(
     delayed(file_to_bounding_boxes)(
-        file_path, args.output_folder, save_images=True, filter_path=args.filter_path
+        file_path, args.output_folder.joinpath(args.method), save_images=True, filter_path=args.filter_path
     )
     for file_path in file_paths
 )
@@ -221,6 +233,6 @@ bounding_boxes_preds = dict(zip(file_names, bbox_list))
 
 
 # save preds (overwrites any previous predictions!)
-output_path = args.output_folder.joinpath('bounding_boxes_preds.json')
+output_path = args.output_folder.joinpath(args.method).joinpath('bounding_boxes_preds.json')
 with output_path.open(mode='w') as f:
     json.dump(bounding_boxes_preds, f)
