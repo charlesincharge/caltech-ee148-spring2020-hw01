@@ -3,6 +3,7 @@ import pathlib
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.stats.stats import pearsonr
+import skimage.measure
 import json
 from PIL import Image, ImageDraw
 from joblib import Parallel, delayed
@@ -39,10 +40,13 @@ def detect_red_light(image_numpy, method, **kwargs):
     return bounding_boxes
 
 
-def detect_red_light_threshold(image_numpy):
+def detect_red_light_threshold(image_numpy, red_threshold=170, red_ratio=1.2):
     """
     This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
     Smoothes data with a Gaussian kernel, then draw boxes around values above a threshold
+
+    red_threshold: red lights must have red value at least this value
+    red_ratio: red lights must have red intensity `red_ratio` times the green/blue channels
     """
     # This should be a list of lists, each of length 4. See format example below.
     bounding_boxes = []
@@ -54,12 +58,10 @@ def detect_red_light_threshold(image_numpy):
     image_green = image_numpy[:, :, 1]
     image_blue = image_numpy[:, :, 2]
 
-    THRESHOLD_RED = 175
-    THRESHOLD_NOT_RED = 125
     red_mask = (
-        (image_red > THRESHOLD_RED)
-        & (image_green < THRESHOLD_NOT_RED)
-        & (image_blue < THRESHOLD_NOT_RED)
+        (image_red > red_threshold)
+        & (image_red > (red_ratio * image_green))
+        & (image_red > (red_ratio * image_blue))
     )
 
     bounding_boxes = mask_to_bboxes(red_mask)
@@ -118,12 +120,20 @@ def detect_red_light_matchedfilter_multi(
 
 
 def mask_to_bboxes(mask):
-    """Convert boolean mask to a list of bounding boxes (around the countors)"""
+    """Convert boolean mask to a list of bounding boxes (around the countors).
+
+    This does use skimage to go from a binary mask to the smallest rectangle that surrounds
+    each "cluster" of thresholded pixels. I checked with a TA that using an
+    external library here was okay, because it was the core of the algorithm
+    (which is thresholding).
+    """
     bbox_list = []
-    contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    for contour in contours:
-        x, y, w, h = cv2.boundingRect(contour)
-        bbox_list.append((x, y, x + w, y + h))
+    # Label connected "True" regions using `label`
+    region_labels = skimage.measure.label(mask)
+    # Collect groups of connected regions & calculate their bounding boxes
+    region_props = skimage.measure.regionprops(region_labels)
+    for prop in region_props:
+        bbox_list.append(prop.bbox)
 
     return bbox_list
 
