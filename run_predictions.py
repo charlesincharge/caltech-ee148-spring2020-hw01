@@ -1,7 +1,7 @@
 import argparse
 import pathlib
 import numpy as np
-from scipy.ndimage import gaussian_filter, maximum_filter, measurements
+from scipy.ndimage import gaussian_filter, maximum_filter, measurements, convolve
 from scipy.stats.stats import pearsonr
 from scipy.signal import convolve, convolve2d, correlate
 from skimage.measure import regionprops
@@ -12,7 +12,7 @@ import cv2
 from joblib import Parallel, delayed
 
 
-def detect_red_light(image_numpy, method):
+def detect_red_light(image_numpy, method, **kwargs):
     """
     This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
     The list <bounding_boxes> should have one element for each red light in the
@@ -30,7 +30,7 @@ def detect_red_light(image_numpy, method):
     if method == 'threshold':
         bounding_boxes = detect_red_light_threshold(image_numpy)
     elif method == 'matchedfilter':
-        bounding_boxes = detect_red_light_matchedfilter(image_numpy)
+        bounding_boxes = detect_red_light_matchedfilter(image_numpy, **kwargs)
     else:
         raise NotImplementedError
 
@@ -65,12 +65,12 @@ def detect_red_light_threshold(image_numpy):
     return bounding_boxes
 
 
-def detect_red_light_matchedfilter(image_numpy, threshold=0.9):
+def detect_red_light_matchedfilter(image_numpy, threshold=0.9, filter_path='filters/redlight.jpg'):
     """
     This function takes a numpy array <image_numpy> and returns a list <bounding_boxes>.
     Convolves image with a matched filter, then finds areas above the threshold.
     """
-    matchedfilter = Image.open('filters/redlight.jpg')
+    matchedfilter = Image.open(filter_path)
     matchedfilter = np.asarray(matchedfilter)
     # l2-normalize
     matchedfilter = matchedfilter / matchedfilter.sum()
@@ -80,13 +80,15 @@ def detect_red_light_matchedfilter(image_numpy, threshold=0.9):
     filter_match = np.zeros(image_numpy.shape[:-1])
     bbox_list = []
     # Iterate over left and right of
-    for x_left in range(image_numpy.shape[0] - matchedfilter.shape[0]):
-        for y_top in range(image_numpy.shape[1] - matchedfilter.shape[1]):
-            sub_image = image_numpy[x_left:(x_left + matchedfilter.shape[0]),y_top:(y_top + matchedfilter.shape[1])]
+    for tl_row in range(image_numpy.shape[0] - matchedfilter.shape[0]):
+        for tl_col in range(image_numpy.shape[1] - matchedfilter.shape[1]):
+            sub_image = image_numpy[tl_row:(tl_row + matchedfilter.shape[0]),tl_col:(tl_col + matchedfilter.shape[1])]
             corr = pearsonr(sub_image.flatten(), matchedfilter.flatten())[0]
-            filter_match[x_left, y_top] = corr
+            filter_match[tl_row, tl_col] = corr
+
+            # Is this sub-image highly correlated (ie, good projection onto) with the filter?
             if corr > threshold:
-                bbox_list.append((x_left, y_top, x_left + matchedfilter.shape[0], y_top + matchedfilter.shape[1]))
+                bbox_list.append((tl_row, tl_col, tl_row + matchedfilter.shape[0], tl_col + matchedfilter.shape[1]))
 
     return bbox_list
 
@@ -100,6 +102,12 @@ def mask_to_bboxes(mask):
         bbox_list.append((x, y, x + w, y + h))
 
     return bbox_list
+
+
+def swap_bbox_format(bbox_tuple):
+    """Swap between (row0, col0, row1, col1) and (x0, y0, x1, y1) formats."""
+    assert len(bbox_tuple) == 4
+    return (bbox_tuple[1], bbox_tuple[0], bbox_tuple[3], bbox_tuple[2])
 
 
 def parse_args():
@@ -126,6 +134,13 @@ def parse_args():
         type=pathlib.Path,
     )
     parser.add_argument(
+        '-f',
+        '--filter-path',
+        help='path to matched filter image. Only valid when using `--method matchedfilter`',
+        default='filters/redlight.jpg',
+        type=pathlib.Path,
+    )
+    parser.add_argument(
         '--save-images',
         help='save images with bounding boxes to output folder',
         action='store_true',
@@ -134,7 +149,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def find_bounding_boxes(file_path, output_folder=None, save_images=False):
+def file_to_bounding_boxes(file_path, output_folder=None, save_images=False, **kwargs):
     """
     file_path: path to image file.
     """
@@ -145,14 +160,14 @@ def find_bounding_boxes(file_path, output_folder=None, save_images=False):
     image_numpy = np.asarray(image)
 
     # Predict bounding boxes and store to dictionary
-    bounding_boxes_pred = detect_red_light(image_numpy, args.method)
+    bounding_boxes_pred = detect_red_light(image_numpy, args.method, **kwargs)
 
     if save_images:
         # Draw bounding boxes and save out images
         draw = ImageDraw.Draw(image)
         NEON_GREEN = '#39FF14'
-        for box in bounding_boxes_pred:
-            draw.rectangle(box, outline=NEON_GREEN)
+        for bbox in bounding_boxes_pred:
+            draw.rectangle(swap_bbox_format(bbox), outline=NEON_GREEN)
         image.save(output_folder.joinpath(file_path.name))
 
     return bounding_boxes_pred
@@ -167,14 +182,16 @@ args.output_folder.mkdir(exist_ok=True)
 file_paths = sorted(args.data_folder.iterdir())
 
 # remove any non-JPEG files:
-# file_paths = [f for f in file_paths if (f.suffix == '.jpg')]
-file_paths = [f for f in file_paths if (f.name == 'RL-016.jpg')]
+file_paths = [f for f in file_paths if (f.suffix == '.jpg')]
+# Limit files. TODO: remove
+# file_paths = [f for f in file_paths if (f.name == 'RL-016.jpg')]
+file_paths = file_paths[:20]
 
 
-# bbox_list = Parallel(n_jobs=-3)(delayed(find_bounding_boxes)(file_path, args.output_folder, True) for file_path in file_paths)
-bbox_list = [find_bounding_boxes(file_path, args.output_folder, True) for file_path in file_paths]
+bbox_list = Parallel(n_jobs=-3)(delayed(file_to_bounding_boxes)(file_path, args.output_folder, save_images=True, filter_path=args.filter_path) for file_path in file_paths)
+# bbox_list = [file_to_bounding_boxes(file_path, args.output_folder, True) for file_path in file_paths]
 file_names = map(lambda x: x.name, file_paths)
-bounding_boxes_preds = dict(zip(file_paths, bbox_list))
+bounding_boxes_preds = dict(zip(file_names, bbox_list))
 
 
 # save preds (overwrites any previous predictions!)
