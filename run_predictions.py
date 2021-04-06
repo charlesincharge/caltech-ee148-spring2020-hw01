@@ -145,6 +145,13 @@ def parse_args():
         help='save images with bounding boxes to output folder',
         action='store_true',
     )
+    parser.add_argument(
+        '-n',
+        '--num-images',
+        help='number of images to process. defaults to all, set to int to process fewer (eg, for debugging)',
+        type=int,
+        default=None
+    )
 
     return parser.parse_args()
 
@@ -183,9 +190,8 @@ file_paths = sorted(args.data_folder.iterdir())
 
 # remove any non-JPEG files:
 file_paths = [f for f in file_paths if (f.suffix == '.jpg')]
-# Limit files. TODO: remove
-# file_paths = [f for f in file_paths if (f.name == 'RL-016.jpg')]
-file_paths = file_paths[:20]
+# Limit files.
+file_paths = file_paths[:args.num_images]
 
 
 bbox_list = Parallel(n_jobs=-3)(delayed(file_to_bounding_boxes)(file_path, args.output_folder, save_images=True, filter_path=args.filter_path) for file_path in file_paths)
